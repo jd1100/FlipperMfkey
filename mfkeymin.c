@@ -11,9 +11,22 @@
 #define BEBIT(x, n) BIT(x, (n) ^ 24)
 #define SWAPENDIAN(x) (x = (x >> 8 & 0xff00ff) | (x & 0xff00ff) << 8, x = x >> 16 | x << 16)
 typedef struct bucket { uint32_t *head; uint32_t *bp; } bucket_t;
+
+// array of with 2 rows and 256 columns so essentially theres 2 elements each with a buffer of 256 elements each
+// so in order to loop through the element you need a nested for loop.
+// what is the input we need to sort?
+
+// so the new typedef called "bucket_array_t" is an array of size [2][256] so there are 2 elements with 256 values in each element
+// total of 2x256 elements with each element being a bucket_t struct thatd make each element 8 bytes
+// so this structure takes up about 4KB 
 typedef bucket_t bucket_array_t[2][0x100];
+
 typedef struct bucket_info { struct { uint32_t *head, *tail; } bucket_info[2][0x100]; uint32_t numbuckets; } bucket_info_t;
+
+// struct "Crypto1State" is a 8 byte struct
 struct Crypto1State {uint32_t odd, even;};
+
+
 uint32_t prng_successor(uint32_t x, uint32_t n) {
     SWAPENDIAN(x);
     while (n--)
@@ -134,24 +147,49 @@ static struct Crypto1State *recover(uint32_t *o_head, uint32_t *o_tail, uint32_t
     return sl;
 }
 struct Crypto1State *lfsr_recovery32(uint32_t ks2, uint32_t in) {
+    
+    // 8 bytes
     struct Crypto1State *statelist;
+    
+    // 4 bytes + 4 bytes + ?
     uint32_t *odd_head = 0, *odd_tail = 0, oks = 0;
+    // 4 bytes + 4 bytes + ?
     uint32_t *even_head = 0, *even_tail = 0, eks = 0;
     int i;
     for (i = 31; i >= 0; i -= 2)
         oks = oks << 1 | BEBIT(ks2, i);
     for (i = 30; i >= 0; i -= 2)
         eks = eks << 1 | BEBIT(ks2, i);
+
+    /* not sure what the "odd" is referring to but this assigns the pointer variables to a piece of memory thats 4194304 bytes big
+    or about 4MB
+    so we have
+    - odd_head 4MB
+    - odd_tail 4MB
+    - even_head 4MB
+    - even_tail 4MB
+    */
+    // allocate 4 * 2^20 bytes
     odd_head = odd_tail = calloc(1, sizeof(uint32_t) << 20);
+
+    // allocate 4 * 2^20 bytes
     even_head = even_tail = calloc(1, sizeof(uint32_t) << 20);
+    
+    // allocate 8 * 2^18 bytes
     statelist =  calloc(1, sizeof(struct Crypto1State) << 18);
+
+    // initialize the structure properties to 0
     statelist->odd = statelist->even = 0;
+    
+    // creates new bucket which is defined as a 2x256 array with each element 8 bytes (head and bp properties are uint32_t pointers)
     bucket_array_t bucket;
     for (i = 0; i < 2; i++) {
+        // for each column in the row, assign the elemtent to a piece of memory 4 * 2^12 bytes
         for (uint32_t j = 0; j <= 0xff; j++) {
             bucket[i][j].head = calloc(1, sizeof(uint32_t) << 12);
         }
     }
+    // set i = to 1 * 2^20 and decrement by 1
     for (i = 1 << 20; i >= 0; --i) {
         if (filter(i) == (oks & 1))
             *++odd_tail = i;
